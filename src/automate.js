@@ -1,71 +1,48 @@
 import { chromium } from 'playwright';
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
+
 const ROUNDER = process.env.ROUNDER_URL || 'https://zixi-dev-tool.vercel.app';
 
-let _browser = null;
-
-async function getBrowser() {
-  if (_browser && _browser.isConnected()) return _browser;
-  _browser = await chromium.launch({
+async function newPage() {
+  const browser = await chromium.launch({
     headless: true,
     args: [
       '--no-sandbox', '--disable-setuid-sandbox',
       '--disable-blink-features=AutomationControlled',
       '--disable-dev-shm-usage',
-      '--window-size=1920,1080',
+      '--single-process', // 省記憶體
+      '--no-zygote',
+      '--window-size=1280,720',
     ],
   });
-  return _browser;
-}
-
-function stealthyPage(page) {
-  // 隱藏自動化特徵
-  page.addInitScript(() => {
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-    Object.defineProperty(navigator, 'languages', { get: () => ['zh-TW', 'zh', 'en'] });
-    // 覆蓋 Chrome 自動化檢測
-    const originalQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = (parameters) => (
-      parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters)
-    );
-  });
-  return page;
-}
-
-async function newPage() {
-  const browser = await getBrowser();
   const ctx = await browser.newContext({
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-    viewport: { width: 1920, height: 1080 },
+    viewport: { width: 1280, height: 720 },
     locale: 'zh-TW',
     timezoneId: 'Asia/Taipei',
   });
   const page = await ctx.newPage();
-  return stealthyPage(page);
+  // 隱藏自動化特徵
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+    Object.defineProperty(navigator, 'languages', { get: () => ['zh-TW', 'zh', 'en'] });
+  });
+  return { browser, page };
 }
 
 // ── Groq 自動註冊 ──
 
 export async function registerGroq(email) {
   console.log(`🤖 Groq 自動註冊: ${email}`);
-  const page = await newPage();
+  const { browser, page } = await newPage();
 
   try {
-    // 1. 去 Groq signup
     await page.goto('https://console.groq.com/signup', { waitUntil: 'networkidle', timeout: 30000 });
-
-    // 試兩種 UI 版本: 直接填 email 或 stytch iframe
     try {
-      // 等 email input 出現
       await page.waitForSelector('input[type="email"], input[name="email"], input[placeholder*="email"]', { timeout: 8000 });
       await page.fill('input[type="email"], input[name="email"], input[placeholder*="email"]', email);
       await page.click('button[type="submit"], button:has-text("Continue"), button:has-text("Send"), button:has-text("Log in")');
     } catch {
-      // Fallback: 有些頁面用 Stytch embedded
-      console.log('⚠️ Stytch iframe 模式, 手動填 email');
-      // 找 iframe
       const frames = page.frames();
       for (const f of frames) {
         if (f.url().includes('stytch')) {
@@ -75,14 +52,12 @@ export async function registerGroq(email) {
         }
       }
     }
-
-    console.log('✅ Groq 註冊表單已送出');
-    await page.close();
+    console.log('✅ Groq 表單已送出');
+    await browser.close();
     return { success: true, message: 'Groq 註冊表單已送出, 請到註冊機收驗證信' };
-
   } catch (err) {
-    console.error('❌ Groq 註冊失敗:', err.message);
-    await page.close().catch(() => {});
+    console.error('❌ Groq 失敗:', err.message);
+    await browser.close().catch(() => {});
     return { success: false, error: err.message };
   }
 }

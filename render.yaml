@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: zixi-registrar
+    env: node
+    buildCommand: npm install && npx playwright install --with-deps chromium
+    startCommand: npm start
+    envVars:
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=256"
+      - key: ROUNDER_URL
+        value: "https://zixi-dev-tool.vercel.app"
